@@ -55,5 +55,11 @@ TEST(OpMsgFuzzerFixtureTest, Ping) {
     ASSERT_EQ(fixture.testOneInput(msg.buf(), msg.size()), 0);
 }
 
+TEST(OpMsgFuzzerFixtureTest, CompressedPingReachesCommandDispatch) {
+    auto fixture = OpMsgFuzzerFixture(/* skipGlobalInitializers */ true);
+    ASSERT_TRUE(fixture.selfTestCompressedDispatch());
+    ASSERT_EQ(fixture.compressedDispatches(), 3);
+}
+
 }  // namespace
 }  // namespace mongo

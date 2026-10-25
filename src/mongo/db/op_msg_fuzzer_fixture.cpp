@@ -27,7 +27,9 @@
  *    it in the license file.
  */
 
+#include <cstdint>
 #include <cstring>
+#include <iostream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -61,9 +63,18 @@
 #include "mongo/db/storage/storage_engine_init.h"
 #include "mongo/db/storage/storage_options.h"
 #include "mongo/db/vector_clock_mutable.h"
+#include "mongo/bson/json.h"
 #include "mongo/rpc/message.h"
+#include "mongo/rpc/op_msg.h"
 #include "mongo/s/sharding_state.h"
+#include "mongo/transport/message_compressor_manager.h"
+#include "mongo/transport/message_compressor_noop.h"
+#include "mongo/transport/message_compressor_registry.h"
+#include "mongo/transport/message_compressor_snappy.h"
+#include "mongo/transport/message_compressor_zlib.h"
+#include "mongo/transport/message_compressor_zstd.h"
 #include "mongo/transport/service_entry_point.h"
+#include "mongo/transport/transport_options_gen.h"
 #include "mongo/util/assert_util.h"
 #include "mongo/util/future.h"
 #include "mongo/util/periodic_runner_factory.h"
@@ -74,7 +85,36 @@ namespace mongo {
 
 namespace {
 constexpr auto kTempDirStem = "op_msg_fuzzer_fixture"_sd;
+
+// Production pre-auth ingress rejects larger bodies. A second, still-bounded cap lets the
+// fuzzer reach the "claimed size exceeds the pre-auth limit" check and the success path for
+// messages that would be legal after authentication, without allocating MaxMessageSizeBytes.
+constexpr size_t kRaisedDecompressCap = 256 * 1024;
+
+size_t preAuthDecompressCap() {
+    const auto configured = transport::gPreAuthMaximumMessageSizeBytes.loadRelaxed();
+    if (configured <= 0) {
+        return 16 * 1024;
+    }
+    return static_cast<size_t>(configured);
 }
+}  // namespace
+
+struct OpMsgFuzzerFixture::CompressionState {
+    CompressionState() : manager(&registry) {
+        std::vector<std::string> names = {"noop", "snappy", "zlib", "zstd"};
+        registry.setSupportedCompressors(std::move(names));
+        registry.registerImplementation(std::make_unique<NoopMessageCompressor>());
+        registry.registerImplementation(std::make_unique<SnappyMessageCompressor>());
+        registry.registerImplementation(std::make_unique<ZlibMessageCompressor>());
+        registry.registerImplementation(std::make_unique<ZstdMessageCompressor>());
+        uassertStatusOK(registry.finalizeSupportedCompressors());
+    }
+
+    MessageCompressorRegistry registry;
+    MessageCompressorManager manager;
+    uint64_t dispatches = 0;
+};
 
 // This must be called before creating any new threads that may access `AuthorizationManager` to
 // avoid a data-race.
@@ -93,6 +133,8 @@ void OpMsgFuzzerFixture::_setAuthorizationManager() {
 
 OpMsgFuzzerFixture::OpMsgFuzzerFixture(bool skipGlobalInitializers)
     : _dir(kTempDirStem.toString()) {
+    _compression = std::make_unique<CompressionState>();
+
     if (!skipGlobalInitializers) {
         auto ret = runGlobalInitializers(std::vector<std::string>{});
         invariant(ret.isOK());
@@ -163,31 +205,162 @@ OpMsgFuzzerFixture::~OpMsgFuzzerFixture() {
     shutdownGlobalStorageEngineCleanly(_serviceContext, true /* memLeakAllowed */);
 }
 
-int OpMsgFuzzerFixture::testOneInput(const char* Data, size_t Size) {
-    if (Size < sizeof(MSGHEADER::Value)) {
-        return 0;
-    }
-
+int OpMsgFuzzerFixture::_dispatchWireMessage(Message msg) {
     auto clientGuard = _clientStrand->bind();
     auto opCtx = _serviceContext->makeOperationContext(clientGuard.get());
     VectorClockMutable::get(_serviceContext)->tickClusterTimeTo(kInMemoryLogicalTime);
 
-    int new_size = Size + sizeof(int);
-    auto sb = SharedBuffer::allocate(new_size);
-    memcpy(sb.get(), &new_size, sizeof(int));
-    memcpy(sb.get() + sizeof(int), Data, Size);
-    Message msg(std::move(sb));
-
     try {
+        if (msg.operation() == dbCompressed) {
+            MessageCompressorId compressorId = 0;
+            // Same entry point as SessionWorkflow::WorkItem::decompressRequest: pre-auth cap
+            // first (this fixture's client is not authenticated), then a raised cap so a
+            // claimed-size mismatch is still evaluated inside decompressMessage.
+            auto sw = _compression->manager.decompressMessage(msg, &compressorId, preAuthDecompressCap());
+            if (!sw.isOK()) {
+                sw = _compression->manager.decompressMessage(
+                    msg, &compressorId, kRaisedDecompressCap);
+            }
+            if (!sw.isOK()) {
+                return 0;
+            }
+            msg = std::move(sw.getValue());
+            ++_compression->dispatches;
+            if (_compression->dispatches <= 16 || (_compression->dispatches % 10000) == 0) {
+                std::cerr << "OP_COMPRESSED_DISPATCH compressorId=" << static_cast<int>(compressorId)
+                          << " opcode=" << static_cast<int32_t>(msg.operation())
+                          << " count=" << _compression->dispatches << "\n";
+            }
+        }
+
         _serviceContext->getService()
             ->getServiceEntryPoint()
             ->handleRequest(opCtx.get(), msg)
             .get();
     } catch (const AssertionException&) {
-        // We need to catch exceptions caused by invalid inputs
+        // Invalid inputs are expected from the fuzzer.
     }
 
     return 0;
+}
+
+int OpMsgFuzzerFixture::testOneInput(const char* Data, size_t Size) {
+    if (Size < sizeof(MSGHEADER::Value)) {
+        return 0;
+    }
+
+    int new_size = Size + sizeof(int);
+    auto sb = SharedBuffer::allocate(new_size);
+    memcpy(sb.get(), &new_size, sizeof(int));
+    memcpy(sb.get() + sizeof(int), Data, Size);
+    return _dispatchWireMessage(Message(std::move(sb)));
+}
+
+int OpMsgFuzzerFixture::testCompressedInput(const char* Data, size_t Size) {
+    if (Size < sizeof(MSGHEADER::Value) || !_compression) {
+        return 0;
+    }
+
+    int new_size = Size + sizeof(int);
+    auto innerBuf = SharedBuffer::allocate(new_size);
+    memcpy(innerBuf.get(), &new_size, sizeof(int));
+    memcpy(innerBuf.get() + sizeof(int), Data, Size);
+    Message inner(std::move(innerBuf));
+
+    const MessageCompressorId ids[] = {
+        static_cast<MessageCompressorId>(MessageCompressor::kSnappy),
+        static_cast<MessageCompressorId>(MessageCompressor::kZlib),
+        static_cast<MessageCompressorId>(MessageCompressor::kZstd),
+    };
+    const auto selector = static_cast<uint8_t>(Data[0]);
+    const MessageCompressorId compressorId = ids[selector % 3];
+    auto swCompressed = _compression->manager.compressMessage(inner, &compressorId);
+    if (!swCompressed.isOK()) {
+        return 0;
+    }
+
+    Message compressed = std::move(swCompressed.getValue());
+    if (compressed.operation() != dbCompressed || compressed.size() <= 0) {
+        return 0;
+    }
+
+    const int len = compressed.size();
+    const int sizeFieldOffset =
+        static_cast<int>(MsgData::MsgDataHeaderSize + sizeof(int32_t));  // skip original opcode
+    if (len < sizeFieldOffset + static_cast<int>(sizeof(int32_t))) {
+        return 0;
+    }
+
+    auto mutated = SharedBuffer::allocate(len);
+    memcpy(mutated.get(), compressed.buf(), len);
+    auto* claimedSize = reinterpret_cast<int32_t*>(mutated.get() + sizeFieldOffset);
+    const int32_t actualSize = *claimedSize;
+    switch ((selector >> 4) & 0x7) {
+        case 0:
+            break;
+        case 1:
+            *claimedSize = actualSize - 1;
+            break;
+        case 2:
+            *claimedSize = actualSize + 1;
+            break;
+        case 3:
+            *claimedSize = 0;
+            break;
+        case 4:
+            *claimedSize = -1;
+            break;
+        default: {
+            int32_t fromInput = actualSize;
+            if (Size >= 1 + sizeof(int32_t)) {
+                memcpy(&fromInput, Data + 1, sizeof(fromInput));
+            }
+            *claimedSize = fromInput;
+            break;
+        }
+    }
+
+    return _dispatchWireMessage(Message(std::move(mutated)));
+}
+
+bool OpMsgFuzzerFixture::selfTestCompressedDispatch() {
+    OpMsgBuilder builder;
+    builder.setBody(fromjson(R"({ping: 1, $db: "admin"})"));
+    Message ping = builder.finishWithoutSizeChecking();
+    if (ping.size() <= static_cast<int>(sizeof(int))) {
+        return false;
+    }
+
+    const uint64_t before = compressedDispatches();
+    const MessageCompressorId ids[] = {
+        static_cast<MessageCompressorId>(MessageCompressor::kSnappy),
+        static_cast<MessageCompressorId>(MessageCompressor::kZlib),
+        static_cast<MessageCompressorId>(MessageCompressor::kZstd),
+    };
+    for (MessageCompressorId id : ids) {
+        auto sw = _compression->manager.compressMessage(ping, &id);
+        if (!sw.isOK() || sw.getValue().operation() != dbCompressed) {
+            std::cerr << "OP_COMPRESSED_SELFTEST compress failed id=" << static_cast<int>(id)
+                      << "\n";
+            return false;
+        }
+        Message compressed = std::move(sw.getValue());
+        const int len = compressed.size();
+        if (len <= static_cast<int>(sizeof(int))) {
+            return false;
+        }
+        // testOneInput prepends the length word; pass the bytes that follow it.
+        testOneInput(compressed.buf() + sizeof(int), static_cast<size_t>(len - sizeof(int)));
+    }
+
+    const uint64_t delta = compressedDispatches() - before;
+    std::cerr << "OP_COMPRESSED_DISPATCH_PROOF dispatches=" << delta
+              << " total=" << compressedDispatches() << "\n";
+    return delta == 3;
+}
+
+uint64_t OpMsgFuzzerFixture::compressedDispatches() const {
+    return _compression ? _compression->dispatches : 0;
 }
 
 }  // namespace mongo
