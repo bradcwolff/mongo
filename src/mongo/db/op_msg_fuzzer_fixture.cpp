@@ -34,10 +34,13 @@
 
 #include <boost/smart_ptr/intrusive_ptr.hpp>
 
+#include "mongo/base/error_codes.h"
 #include "mongo/base/initializer.h"
 #include "mongo/base/status.h"
 #include "mongo/base/string_data.h"
+#include "mongo/bson/bsonobj.h"
 #include "mongo/db/auth/authorization_manager.h"
+#include "mongo/db/auth/authorization_session.h"
 #include "mongo/db/catalog/collection.h"
 #include "mongo/db/catalog/collection_impl.h"
 #include "mongo/db/catalog/database_holder.h"
@@ -47,6 +50,7 @@
 #include "mongo/db/op_msg_fuzzer_fixture.h"
 #include "mongo/db/op_observer/op_observer.h"
 #include "mongo/db/op_observer/op_observer_registry.h"
+#include "mongo/db/repl/member_state.h"
 #include "mongo/db/repl/repl_settings.h"
 #include "mongo/db/repl/replication_coordinator.h"
 #include "mongo/db/repl/replication_coordinator_mock.h"
@@ -62,6 +66,7 @@
 #include "mongo/db/storage/storage_options.h"
 #include "mongo/db/vector_clock_mutable.h"
 #include "mongo/rpc/message.h"
+#include "mongo/rpc/op_msg.h"
 #include "mongo/s/sharding_state.h"
 #include "mongo/transport/service_entry_point.h"
 #include "mongo/util/assert_util.h"
@@ -161,6 +166,44 @@ OpMsgFuzzerFixture::~OpMsgFuzzerFixture() {
     }
 
     shutdownGlobalStorageEngineCleanly(_serviceContext, true /* memLeakAllowed */);
+}
+
+void OpMsgFuzzerFixture::prepareForAggregationExecutionFuzzing() {
+    auto clientGuard = _clientStrand->bind();
+    AuthorizationSession::get(clientGuard.get())->grantInternalAuthorization(clientGuard.get());
+
+    auto* replCoord = repl::ReplicationCoordinator::get(_serviceContext);
+    invariant(replCoord);
+    auto* mock = dynamic_cast<repl::ReplicationCoordinatorMock*>(replCoord);
+    invariant(mock);
+    mock->alwaysAllowWrites(true);
+    uassertStatusOK(mock->setFollowerMode(repl::MemberState(repl::MemberState::RS_PRIMARY)));
+}
+
+StatusWith<BSONObj> OpMsgFuzzerFixture::runCommand(const BSONObj& body) {
+    auto clientGuard = _clientStrand->bind();
+    auto opCtx = _serviceContext->makeOperationContext(clientGuard.get());
+    VectorClockMutable::get(_serviceContext)->tickClusterTimeTo(kInMemoryLogicalTime);
+
+    try {
+        OpMsgBuilder msgBuilder;
+        msgBuilder.setBody(body);
+        auto msg = msgBuilder.finish();
+        auto dbResponse = _serviceContext->getService()
+                              ->getServiceEntryPoint()
+                              ->handleRequest(opCtx.get(), msg)
+                              .get();
+        if (dbResponse.response.empty()) {
+            return Status(ErrorCodes::UnknownError, "service entry point returned an empty reply");
+        }
+        auto parsed = OpMsg::parseOwned(dbResponse.response);
+        if (!parsed.body["ok"].trueValue()) {
+            return Status(ErrorCodes::UnknownError, parsed.body.toString());
+        }
+        return parsed.body.getOwned();
+    } catch (const DBException& ex) {
+        return ex.toStatus();
+    }
 }
 
 int OpMsgFuzzerFixture::testOneInput(const char* Data, size_t Size) {

@@ -3697,6 +3697,20 @@ mongo_cc_fuzzer_test(
     ],
 )
 
+# Structure-aware aggregation execution fuzzer. Grammar bytes become pipeline
+# commands and are dispatched through op_msg_fuzzer_fixture's ServiceContext.
+# Build only with --//bazel/config:fsan=True (and address sanitizer in practice).
+mongo_cc_fuzzer_test(
+    name = "agg_exec_fuzzer",
+    srcs = [
+        "agg_exec_fuzzer.cpp",
+    ],
+    deps = [
+        ":op_msg_fuzzer_fixture",
+        ":server_base",
+    ],
+)
+
 mongo_cc_unit_test(
     name = "read_write_concern_test",
     srcs = [
