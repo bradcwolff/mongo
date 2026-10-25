@@ -56,6 +56,7 @@
 #include "mongo/db/auth/sasl_scram_server_conversation.h"
 #include "mongo/db/auth/user.h"
 #include "mongo/db/service_context.h"
+#include "mongo/util/database_name_util.h"
 #include "mongo/idl/idl_parser.h"
 #include "mongo/util/base64.h"
 #include "mongo/util/password_digest.h"
@@ -176,8 +177,8 @@ public:
                     _fuzzScram<SaslSCRAMSHA256ServerMechanism>(payload, payloadSize, data[0]);
                     break;
                 case Target::kPlain:
-                    _step(std::make_unique<SASLPlainServerMechanism>(kFuzzerDb.toString()),
-                          std::string(payload, payloadSize));
+                    (void)_step(std::make_unique<SASLPlainServerMechanism>(kFuzzerDb.toString()),
+                                std::string(payload, payloadSize));
                     break;
                 case Target::kSaslStart:
                     _fuzzSaslStart(payload, payloadSize);
@@ -189,7 +190,7 @@ public:
                     _fuzzOidcStep2(payload, payloadSize);
                     break;
                 case Target::kOidcJwt:
-                    crypto::JWSValidatedToken::extractIssuerAndAudienceFromCompactSerialization(
+                    (void)crypto::JWSValidatedToken::extractIssuerAndAudienceFromCompactSerialization(
                         StringData(payload, payloadSize));
                     break;
                 case Target::kOauthMetadata:
@@ -240,9 +241,9 @@ private:
     void _fuzzScram(const char* data, size_t size, char selector) {
         auto mechanism = std::make_unique<Mechanism>(kFuzzerDb.toString());
         if ((static_cast<uint8_t>(selector) & 0x80) != 0) {
-            mechanism->setOptions(BSON(saslCommandOptionSkipEmptyExchange << true));
+            (void)mechanism->setOptions(BSON(saslCommandOptionSkipEmptyExchange << true));
         } else if ((static_cast<uint8_t>(selector) & 0x40) != 0) {
-            mechanism->setOptions(BSON(saslCommandOptionSkipEmptyExchange << "nope"));
+            (void)mechanism->setOptions(BSON(saslCommandOptionSkipEmptyExchange << "nope"));
         }
 
         StringData step1(data, size);
@@ -263,7 +264,7 @@ private:
         }
         // Second step parses client-final-message (channel binding, nonce, proof).
         const auto secondPayload = step2.empty() ? step1 : step2;
-        mechanism->step(_opCtx.get(), secondPayload);
+        (void)mechanism->step(_opCtx.get(), secondPayload);
     }
 
     boost::optional<BSONObj> _parseBson(const char* data, size_t size) {
@@ -290,7 +291,10 @@ private:
         }
         auto request = auth::SaslStartCommand::parse(IDLParserContext("sasl-fuzzer-start"), *obj);
         auto swMech = SASLServerMechanismRegistry::get(_serviceContext->getService())
-                          .getServerMechanism(request.getMechanism(), request.getDbName().toString());
+                          .getServerMechanism(request.getMechanism(),
+                                              DatabaseNameUtil::serialize(
+                                                  request.getDbName(),
+                                                  request.getSerializationContext()));
         if (!swMech.isOK()) {
             return;
         }
@@ -298,7 +302,7 @@ private:
         if (request.getOptions()) {
             uassertStatusOK(mechanism->setOptions(*request.getOptions()));
         }
-        mechanism->step(_opCtx.get(), request.getPayload().get());
+        (void)mechanism->step(_opCtx.get(), request.getPayload().get());
     }
 
     void _fuzzSaslContinue(const char* data, size_t size) {
@@ -324,7 +328,8 @@ private:
         }
         auto parsed =
             auth::OIDCMechanismClientStep2::parse(IDLParserContext("sasl-fuzzer-oidc-2"), *obj);
-        crypto::JWSValidatedToken::extractIssuerAndAudienceFromCompactSerialization(parsed.getJWT());
+        (void)crypto::JWSValidatedToken::extractIssuerAndAudienceFromCompactSerialization(
+            parsed.getJWT());
     }
 
     void _fuzzOauthMetadata(const char* data, size_t size) {
