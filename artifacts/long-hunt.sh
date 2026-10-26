@@ -85,7 +85,11 @@ run_one() {
     local f
     for f in fuzz-*.log; do
       [ -e "$f" ] || continue
-      cp "$f" "${prefix}worker-log-${stamp}-${f}"
+      echo "----- ${f} tail -----" >> "$log"
+      tail -n 40 "$f" >> "$log"
+      if [ "$rc" -ne 0 ]; then
+        cp "$f" "${prefix}worker-log-${stamp}-${f}"
+      fi
     done
     if [ "$rc" -eq 0 ]; then
       break
