@@ -44,35 +44,57 @@ date -u +%Y-%m-%dT%H:%M:%SZ > artifacts/meta/started-utc.txt
 bazel shutdown >> artifacts/logs/driver.log 2>&1 || true
 
 run_one() {
-  local name=$1 bin=$2 seconds=$3 forks=$4 rss=$5 maxlen=$6 tmo=$7
-  local log="artifacts/logs/${name}.log"
-  local prefix="artifacts/crashers/${name}/"
-  local corpus="artifacts/corpus/${name}"
+  local name=$1 bin=$2 seconds=$3 workers=$4 rss=$5 maxlen=$6 tmo=$7
+  local log="/workspace/artifacts/logs/${name}.log"
+  local prefix="/workspace/artifacts/crashers/${name}/"
+  local corpus="/workspace/artifacts/corpus/${name}"
+  local binpath="/workspace/${bin}"
+  local work="/workspace/artifacts/logs/work-${name}"
+  mkdir -p "$work"
+  # -jobs writes fuzz-<job>.log in the cwd. Keep those per target.
+  local argv="${binpath} -jobs=${workers} -workers=${workers} -max_total_time=${seconds} -print_final_stats=1 -rss_limit_mb=${rss} -max_len=${maxlen} -timeout=${tmo} -detect_leaks=0 -artifact_prefix=${prefix} ${corpus}"
   {
     echo "SHA ${SHA}"
-    echo "ARGV ${bin} -fork=${forks} -ignore_crashes=1 -ignore_ooms=1 -ignore_timeouts=1 -max_total_time=${seconds} -print_final_stats=1 -rss_limit_mb=${rss} -max_len=${maxlen} -timeout=${tmo} -detect_leaks=0 -artifact_prefix=${prefix} ${corpus}"
+    echo "ARGV ${argv}"
     echo "START $(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "NOTE in-binary SASL self-test JWT still lacks exp; corpus oidc_jwt and oidc_step2 include exp=1893456000. Binary was not rebuilt."
+    echo "NOTE workers are long-lived. -fork was not used: each fork child restarts the server, and op_msg wall throughput fell to about 10 exec/s."
   } > "$log"
-  cp "$log" "artifacts/meta/${name}.argv"
-  set +e
-  "$bin" \
-    -fork="${forks}" \
-    -ignore_crashes=1 \
-    -ignore_ooms=1 \
-    -ignore_timeouts=1 \
-    -max_total_time="${seconds}" \
-    -print_final_stats=1 \
-    -rss_limit_mb="${rss}" \
-    -max_len="${maxlen}" \
-    -timeout="${tmo}" \
-    -detect_leaks=0 \
-    -artifact_prefix="${prefix}" \
-    "${corpus}" >> "$log" 2>&1
-  local rc=$?
-  set -e
-  echo "END $(date -u +%Y-%m-%dT%H:%M:%SZ) rc=${rc}" >> "$log"
-  echo "${name} rc=${rc}" >> artifacts/logs/driver.log
+  cp "$log" "/workspace/artifacts/meta/${name}.argv"
+  local deadline=$(( $(date +%s) + seconds ))
+  cd "$work"
+  while [ "$(date +%s)" -lt $((deadline - 20)) ]; do
+    local left=$(( deadline - $(date +%s) ))
+    set +e
+    "$binpath" \
+      -jobs="${workers}" \
+      -workers="${workers}" \
+      -max_total_time="${left}" \
+      -print_final_stats=1 \
+      -rss_limit_mb="${rss}" \
+      -max_len="${maxlen}" \
+      -timeout="${tmo}" \
+      -detect_leaks=0 \
+      -artifact_prefix="${prefix}" \
+      "${corpus}" >> "$log" 2>&1
+    local rc=$?
+    set -e
+    local stamp
+    stamp=$(date -u +%Y%m%dT%H%M%SZ)
+    echo "EXIT ${rc} ${stamp} left_at_start=${left}" >> "$log"
+    local f
+    for f in fuzz-*.log; do
+      [ -e "$f" ] || continue
+      cp "$f" "${prefix}worker-log-${stamp}-${f}"
+    done
+    if [ "$rc" -eq 0 ]; then
+      break
+    fi
+    echo "RESTART rc=${rc}" >> "$log"
+    sleep 2
+  done
+  echo "END $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$log"
+  echo "${name} done" >> /workspace/artifacts/logs/driver.log
 }
 
 # Drop the lower-ceiling fuzzer if the box is about to OOM. op_msg and sasl keep running.

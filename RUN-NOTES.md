@@ -93,9 +93,11 @@ One execution of only the new `oidc_jwt` seed covered 1833 edges / 1834 features
 
 ## Long hunt
 
-Same already-linked binaries (`bazel-bin/.../*_fuzzer`, still carrying the local ASan TLS epilogue patch). No rebuild. `bazel shutdown` first so the ~2.3GiB server is not sitting next to the fuzzers. Machine is 4 CPUs and 16GiB with no swap. Smoke peaks were about 3841MB (`op_msg`), 2084MB (`sasl`), and 771MB (`protocol`), so the parallel shape is `op_msg` fork=2, `sasl` fork=1, `protocol` fork=1. Expected steady RSS is about 7.6+2.1+0.8 GiB. `rss_limit_mb` is above those peaks (5120 / 3072 / 1536) and the sum of the limits is under 16GiB. A single malloc larger than `rss_limit_mb` is also rejected by libFuzzer (`malloc_limit_mb` defaults to the same value). LeakSanitizer stays off (`ASAN_OPTIONS=detect_leaks=0` and `-detect_leaks=0`): the harness holds a process-lifetime service context, and an exit-time leak report would abort the session. Heap-use-after-free, overflow, and UBSan still halt the child. `-fork` restarts a child after a crash, oom, or timeout (`-ignore_crashes=1 -ignore_ooms=1 -ignore_timeouts=1`) and writes each artifact under `artifacts/crashers/<target>/`. The growing corpus is `artifacts/corpus/<target>/`, seeded from the in-tree SASL seeds (including the fixed JWT) and the smoke corpora.
+Same already-linked binaries (`bazel-bin/.../*_fuzzer`, still carrying the local ASan TLS epilogue patch). No rebuild. `bazel shutdown` first so the ~2.3GiB server is not sitting next to the fuzzers. Machine is 4 CPUs and 16GiB with no swap. Smoke peaks were about 3841MB (`op_msg`), 2084MB (`sasl`), and 771MB (`protocol`). Parallel shape is `-jobs=2 -workers=2` for `op_msg` and `-jobs=1 -workers=1` for `sasl` and `protocol`. Two `op_msg` workers are the most that fit next to one `sasl` worker (about 7.6GiB + 2.1GiB). `protocol` adds about 0.8GiB for its shorter hour. `rss_limit_mb` is above those peaks (5120 / 3072 / 1536). A single malloc larger than `rss_limit_mb` is also rejected by libFuzzer (`malloc_limit_mb` defaults to the same value). LeakSanitizer stays off (`ASAN_OPTIONS=detect_leaks=0` and `-detect_leaks=0`): the harness holds a process-lifetime service context, and an exit-time leak report would abort the session. Heap-use-after-free, overflow, and UBSan still halt the worker.
 
-`-max_total_time` is 14400s for `op_msg_fuzzer` and `sasl_handshake_fuzzer`, and 3600s for `protocol_fuzzer`. Driver and argv are `artifacts/long-hunt.sh`. Each log starts with the harness commit SHA and the fuzzer argv.
+`-fork` was tried first and stopped. LLVM 12's fork mode runs each child for a few seconds and then merges, which restarts the server every slice. After two minutes `op_msg` had about 1076 executions (around 10/s) against a 318 exec/s smoke. `-jobs` / `-workers` keep the process alive for the whole `-max_total_time`. If a worker exits non-zero, `artifacts/long-hunt.sh` copies `fuzz-<job>.log` (the sanitizer stack) next to the crasher and starts another job for the remaining wall time. Artifacts go to `artifacts/crashers/<target>/`. The growing corpus is `artifacts/corpus/<target>/`, seeded from the in-tree SASL seeds (including the fixed JWT) and the smoke corpora.
+
+`-max_total_time` is 14400s for `op_msg_fuzzer` and `sasl_handshake_fuzzer`, and 3600s for `protocol_fuzzer`. Each log starts with the harness commit SHA and the fuzzer argv.
 
 ```bash
 export ASAN_SYMBOLIZER_PATH="$HOME/.cache/bazel/_bazel_ubuntu/eab0d61a99b6696edb3d2aff87b585e8/external/mongo_toolchain_v4/stow/llvm-v4/bin/llvm-symbolizer"
@@ -103,13 +105,14 @@ export UBSAN_SYMBOLIZER_PATH="$ASAN_SYMBOLIZER_PATH"
 export ASAN_OPTIONS="halt_on_error=1:detect_leaks=0:allocator_may_return_null=1:symbolize=1:malloc_context_size=30"
 export UBSAN_OPTIONS="halt_on_error=1:print_stacktrace=1:symbolize=1"
 # from /workspace, after seeding artifacts/corpus/<target>
-bazel-bin/src/mongo/db/op_msg_fuzzer -fork=2 -ignore_crashes=1 -ignore_ooms=1 -ignore_timeouts=1 \
+# -jobs writes fuzz-<job>.log in the cwd (artifacts/logs/work-<target>/).
+bazel-bin/src/mongo/db/op_msg_fuzzer -jobs=2 -workers=2 \
   -max_total_time=14400 -print_final_stats=1 -rss_limit_mb=5120 -max_len=8192 -timeout=60 \
   -detect_leaks=0 -artifact_prefix=artifacts/crashers/op_msg/ artifacts/corpus/op_msg
-bazel-bin/src/mongo/db/auth/sasl_handshake_fuzzer -fork=1 -ignore_crashes=1 -ignore_ooms=1 -ignore_timeouts=1 \
+bazel-bin/src/mongo/db/auth/sasl_handshake_fuzzer -jobs=1 -workers=1 \
   -max_total_time=14400 -print_final_stats=1 -rss_limit_mb=3072 -max_len=4096 -timeout=30 \
   -detect_leaks=0 -artifact_prefix=artifacts/crashers/sasl/ artifacts/corpus/sasl
-bazel-bin/src/mongo/rpc/protocol_fuzzer -fork=1 -ignore_crashes=1 -ignore_ooms=1 -ignore_timeouts=1 \
+bazel-bin/src/mongo/rpc/protocol_fuzzer -jobs=1 -workers=1 \
   -max_total_time=3600 -print_final_stats=1 -rss_limit_mb=1536 -max_len=8192 -timeout=30 \
   -detect_leaks=0 -artifact_prefix=artifacts/crashers/protocol/ artifacts/corpus/protocol
 ```
