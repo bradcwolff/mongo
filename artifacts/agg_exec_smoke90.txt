@@ -1,0 +1,37 @@
+Aggregation execution fuzzer smoke (no sanitizer crash).
+
+Binary: bazel-bin/src/mongo/db/agg_exec_fuzzer
+ASAN_OPTIONS=abort_on_error=1:halt_on_error=1:detect_leaks=0:allocator_may_return_null=1
+Flags: -rss_limit_mb=0 -max_total_time=90 -timeout=30 -print_final_stats=1
+Corpus: src/mongo/db/fuzz_corpus/agg_exec_fuzzer (16 seeds)
+Exit: 0
+No crash, timeout, or OOM artifact was written.
+
+agg_exec_fuzzer setup trySbeEngine: ok
+agg_exec_fuzzer setup featureFlagSbeFull: UnknownError: { ok: 0.0, errmsg: "not allowed to change [featureFlagSbeFull] at runtime", code: 20, codeName: "IllegalOperation" }
+agg_exec_fuzzer setup insert docs: ok
+agg_exec_fuzzer setup insert other: ok
+agg_exec_fuzzer setup insert graph: ok
+agg_exec_fuzzer setup index docs: ok
+agg_exec_fuzzer setup index other: ok
+agg_exec_fuzzer setup index graph: ok
+agg_exec_fuzzer setup probe $expr+$group: ok
+agg_exec_fuzzer setup probe $lookup: ok
+agg_exec_fuzzer setup probe $lookup pipeline: ok
+agg_exec_fuzzer setup probe $graphLookup: ok
+agg_exec_fuzzer setup probe $setWindowFields: ok
+agg_exec_fuzzer setup sort spill limit: ok
+agg_exec_fuzzer setup group spill limit: ok
+agg_exec_fuzzer setup sbe hash agg spill limit: ok
+agg_exec_fuzzer setup sbe hash agg force spill: ok
+agg_exec_fuzzer ready
+INFO: seed corpus: files: 16 min: 6b max: 70b total: 576b rss: 1709Mb
+#17	INITED cov: 5448 ft: 6408 corp: 15/506b exec/s: 17 rss: 1711Mb
+#50837	DONE   cov: 13213 ft: 16538 corp: 529/21Kb lim: 82 exec/s: 558 rss: 1712Mb
+Done 50837 runs in 91 second(s)
+stat::number_of_executed_units: 50837
+stat::average_exec_per_sec:     558
+stat::new_units_added:          954
+stat::slowest_unit_time_sec:    0
+stat::peak_rss_mb:              1712
+SMOKE_EXIT:0

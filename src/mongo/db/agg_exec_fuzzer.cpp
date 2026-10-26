@@ -48,8 +48,23 @@
 
 #include "mongo/bson/bsonobjbuilder.h"
 #include "mongo/bson/json.h"
+#include "mongo/db/commands/run_aggregate.h"
 #include "mongo/db/op_msg_fuzzer_fixture.h"
 #include "mongo/util/time_support.h"
+
+// ODR-use a symbol from //src/mongo/db/commands:standalone so the linker keeps
+// that shared library. Its static initializers register aggregate/insert/createIndexes.
+static const auto kKeepStandaloneCommands = &mongo::runAggregate;
+
+// This toolchain's clang emits calls to __asan_set_shadow_(addr, size) to clear
+// an inline stack-shadow region on function exit (the same (addr, size) shape as
+// __asan_set_shadow_00). compiler-rt only defines the suffixed setters, and mold
+// does not rewrite the unsuffixed symbol, so shared objects import it and the
+// executable has to provide it. -rdynamic exports this definition to those DSOs.
+extern "C" void __asan_set_shadow_00(unsigned long addr, unsigned long size);
+extern "C" void __asan_set_shadow_(unsigned long addr, unsigned long size) {
+    __asan_set_shadow_00(addr, size);
+}
 
 namespace mongo {
 namespace {
@@ -992,13 +1007,15 @@ BSONObj buildAggregateCommand(const uint8_t* data, size_t size) {
         BSONObjBuilder cursor(cmd.subobjStart("cursor"_sd));
         cursor.append("batchSize"_sd, 1 + static_cast<int>(flags & 0x1f));
     }
-    BSONArrayBuilder pipeline(cmd.subarrayStart("pipeline"_sd));
-    if (collectionless) {
-        appendDocumentsStage(in, pipeline);
-    }
-    for (int i = 0; i < nStages; ++i) {
-        const bool first = !collectionless && i == 0;
-        appendStage(in, pipeline, first, i + 1 == nStages);
+    {
+        BSONArrayBuilder pipeline(cmd.subarrayStart("pipeline"_sd));
+        if (collectionless) {
+            appendDocumentsStage(in, pipeline);
+        }
+        for (int i = 0; i < nStages; ++i) {
+            const bool first = !collectionless && i == 0;
+            appendStage(in, pipeline, first, i + 1 == nStages);
+        }
     }
     return cmd.obj();
 }
@@ -1052,15 +1069,17 @@ BSONObj makeInsert(StringData coll, int count, bool duplicateA) {
     cmd.append("insert"_sd, coll);
     cmd.append("$db"_sd, "fuzzdb"_sd);
     cmd.append("ordered"_sd, true);
-    BSONArrayBuilder docs(cmd.subarrayStart("documents"_sd));
-    for (int i = 0; i < count; ++i) {
-        BSONObjBuilder doc(docs.subobjStart());
-        doc.append("_id"_sd, i);
-        appendCoreFields(doc, i, duplicateA ? (i % 8) : i);
-        if (i == 0) {
-            doc.appendNull("parent"_sd);
-        } else {
-            doc.append("parent"_sd, i - 1);
+    {
+        BSONArrayBuilder docs(cmd.subarrayStart("documents"_sd));
+        for (int i = 0; i < count; ++i) {
+            BSONObjBuilder doc(docs.subobjStart());
+            doc.append("_id"_sd, i);
+            appendCoreFields(doc, i, duplicateA ? (i % 8) : i);
+            if (i == 0) {
+                doc.appendNull("parent"_sd);
+            } else {
+                doc.append("parent"_sd, i - 1);
+            }
         }
     }
     return cmd.obj();
@@ -1108,6 +1127,7 @@ BSONObj setParameterCmd(StringData name, StringData value) {
 class AggExecFuzzerHarness {
 public:
     AggExecFuzzerHarness() {
+        (void)kKeepStandaloneCommands;
         _fixture.prepareForAggregationExecutionFuzzing();
         logStatus("trySbeEngine",
                   _fixture
@@ -1269,22 +1289,24 @@ private:
         BSONObjBuilder cmd;
         cmd.append("createIndexes"_sd, coll);
         cmd.append("$db"_sd, "fuzzdb"_sd);
-        BSONArrayBuilder indexes(cmd.subarrayStart("indexes"_sd));
         {
-            BSONObjBuilder idx(indexes.subobjStart());
+            BSONArrayBuilder indexes(cmd.subarrayStart("indexes"_sd));
             {
-                BSONObjBuilder key(idx.subobjStart("key"_sd));
-                key.append("a"_sd, 1);
+                BSONObjBuilder idx(indexes.subobjStart());
+                {
+                    BSONObjBuilder key(idx.subobjStart("key"_sd));
+                    key.append("a"_sd, 1);
+                }
+                idx.append("name"_sd, "a_1"_sd);
             }
-            idx.append("name"_sd, "a_1"_sd);
-        }
-        {
-            BSONObjBuilder idx(indexes.subobjStart());
             {
-                BSONObjBuilder key(idx.subobjStart("key"_sd));
-                key.append("loc"_sd, "2dsphere"_sd);
+                BSONObjBuilder idx(indexes.subobjStart());
+                {
+                    BSONObjBuilder key(idx.subobjStart("key"_sd));
+                    key.append("loc"_sd, "2dsphere"_sd);
+                }
+                idx.append("name"_sd, "loc_2dsphere"_sd);
             }
-            idx.append("name"_sd, "loc_2dsphere"_sd);
         }
         return cmd.obj();
     }
@@ -1295,11 +1317,15 @@ private:
 }  // namespace
 
 int aggExecFuzzerTestOneInput(const uint8_t* data, size_t size) {
-    static AggExecFuzzerHarness* harness = [] {
+    // Function-local static so the fixture destructor runs at process exit and can
+    // shut down the index-build thread pool before the global ServiceContext.
+    static AggExecFuzzerHarness* harness = nullptr;
+    if (!harness) {
         auto core = boost::log::core::get();
         core->set_logging_enabled(false);
-        return new AggExecFuzzerHarness();
-    }();
+        static AggExecFuzzerHarness instance;
+        harness = &instance;
+    }
     return harness->testOne(data, size);
 }
 

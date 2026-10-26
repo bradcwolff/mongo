@@ -79,6 +79,10 @@ public:
 private:
     void _setAuthorizationManager();
 
+    // True after prepareForAggregationExecutionFuzzing installs an IndexBuildsCoordinator.
+    // The destructor shuts that coordinator down before the storage engine.
+    bool _indexBuildsCoordinatorInstalled = false;
+
     const LogicalTime kInMemoryLogicalTime = LogicalTime(Timestamp(3, 1));
 
     // This member is responsible for both creating and deleting the base directory. Think of it as

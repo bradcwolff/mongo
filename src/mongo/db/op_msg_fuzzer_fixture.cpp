@@ -47,9 +47,12 @@
 #include "mongo/db/catalog/database_holder_impl.h"
 #include "mongo/db/concurrency/d_concurrency.h"
 #include "mongo/db/concurrency/lock_manager_defs.h"
+#include "mongo/db/index_builds_coordinator.h"
+#include "mongo/db/index_builds_coordinator_mongod.h"
 #include "mongo/db/op_msg_fuzzer_fixture.h"
 #include "mongo/db/op_observer/op_observer.h"
 #include "mongo/db/op_observer/op_observer_registry.h"
+#include "mongo/db/query/query_settings/query_settings_manager.h"
 #include "mongo/db/repl/member_state.h"
 #include "mongo/db/repl/repl_settings.h"
 #include "mongo/db/repl/replication_coordinator.h"
@@ -155,6 +158,12 @@ OpMsgFuzzerFixture::OpMsgFuzzerFixture(bool skipGlobalInitializers)
 }
 
 OpMsgFuzzerFixture::~OpMsgFuzzerFixture() {
+    if (_indexBuildsCoordinatorInstalled) {
+        auto clientGuard = _clientStrand->bind();
+        auto opCtx = _serviceContext->makeOperationContext(clientGuard.get());
+        IndexBuildsCoordinator::get(_serviceContext)->shutdown(opCtx.get());
+    }
+
     CollectionShardingStateFactory::clear(_serviceContext);
 
     {
@@ -178,6 +187,15 @@ void OpMsgFuzzerFixture::prepareForAggregationExecutionFuzzing() {
     invariant(mock);
     mock->alwaysAllowWrites(true);
     uassertStatusOK(mock->setFollowerMode(repl::MemberState(repl::MemberState::RS_PRIMARY)));
+
+    // createIndexes invariant-fails unless a coordinator is installed. The byte-oriented
+    // op_msg fuzzer does not call this method, so its ServiceContext stays unchanged.
+    IndexBuildsCoordinator::set(_serviceContext, std::make_unique<IndexBuildsCoordinatorMongod>());
+    _indexBuildsCoordinatorInstalled = true;
+
+    // Aggregate registers query stats and then looks up query settings. The manager
+    // decoration is null until create() runs, which mongod_main does and this fixture does not.
+    query_settings::QuerySettingsManager::create(_serviceContext, {}, {});
 }
 
 StatusWith<BSONObj> OpMsgFuzzerFixture::runCommand(const BSONObj& body) {
