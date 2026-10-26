@@ -82,6 +82,8 @@ Crash inputs and sanitizer stacks, if any, are kept under `artifacts/`. This har
 
 Branch `cursor/agg-exec-fuzzer-72a8`, base tag `r8.0.34` (`a1cb58fa746233febef0da3e8034533ed4320c22`), PR base `v8.0.34` (same commit; there is no remote `r8.0.34` branch).
 
+Harness and smoke revision: `19215cd4349c58008a7b5cd64aafa942e9504d20`.
+
 Sanitizer build of `//src/mongo/db:agg_exec_fuzzer` completed (`--//bazel/config:asan=True --//bazel/config:fsan=True`, `opt=debug`, system allocator, dynamic link, `build_enterprise=False`, `--jobs=2`). Binary: `bazel-bin/src/mongo/db/agg_exec_fuzzer`.
 
 One-input smoke (`-runs=1` on `seed_00`) exited 0. Setup log:
