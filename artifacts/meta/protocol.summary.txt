@@ -1,0 +1,24 @@
+SHA 8ea74809b5e739c66920800eef9fb9b27dc2a228
+ARGV /workspace/bazel-bin/src/mongo/rpc/protocol_fuzzer -jobs=1 -workers=1 -max_total_time=3600 -print_final_stats=1 -rss_limit_mb=1536 -max_len=8192 -timeout=30 -detect_leaks=0 -artifact_prefix=/workspace/artifacts/crashers/protocol/ /workspace/artifacts/corpus/protocol
+START 2026-10-26T01:43:44Z
+NOTE in-binary SASL self-test JWT still lacks exp; corpus oidc_jwt and oidc_step2 include exp=1893456000. Binary was not rebuilt.
+NOTE workers are long-lived. -fork was not used: each fork child restarts the server, and op_msg wall throughput fell to about 10 exec/s.
+================== Job 0 exited with exit code 0 ============
+Slowest unit: 1796 s:
+artifact_prefix='/workspace/artifacts/crashers/protocol/'; Test unit written to /workspace/artifacts/crashers/protocol/slow-unit-e3e1c49f4c77594ec3b82205a68b31793ce066c6
+#6870407	DONE   cov: 9088 ft: 13490 corp: 244/10565b lim: 8192 exec/s: 1204 rss: 772Mb
+Done 6870407 runs in 5702 second(s)
+stat::number_of_executed_units: 6870407
+stat::average_exec_per_sec:     1204
+stat::new_units_added:          142
+stat::slowest_unit_time_sec:    1796
+stat::peak_rss_mb:              772
+EXIT 0 20261026T031854Z left_at_start=3600
+#6870407	DONE   cov: 9088 ft: 13490 corp: 244/10565b lim: 8192 exec/s: 1204 rss: 772Mb
+Done 6870407 runs in 5702 second(s)
+stat::number_of_executed_units: 6870407
+stat::average_exec_per_sec:     1204
+stat::new_units_added:          142
+stat::slowest_unit_time_sec:    1796
+stat::peak_rss_mb:              772
+END 2026-10-26T03:18:54Z

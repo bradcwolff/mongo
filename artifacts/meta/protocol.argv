@@ -1,0 +1,5 @@
+SHA 8ea74809b5e739c66920800eef9fb9b27dc2a228
+ARGV /workspace/bazel-bin/src/mongo/rpc/protocol_fuzzer -jobs=1 -workers=1 -max_total_time=3600 -print_final_stats=1 -rss_limit_mb=1536 -max_len=8192 -timeout=30 -detect_leaks=0 -artifact_prefix=/workspace/artifacts/crashers/protocol/ /workspace/artifacts/corpus/protocol
+START 2026-10-26T01:43:44Z
+NOTE in-binary SASL self-test JWT still lacks exp; corpus oidc_jwt and oidc_step2 include exp=1893456000. Binary was not rebuilt.
+NOTE workers are long-lived. -fork was not used: each fork child restarts the server, and op_msg wall throughput fell to about 10 exec/s.

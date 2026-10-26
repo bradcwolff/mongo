@@ -116,3 +116,29 @@ bazel-bin/src/mongo/rpc/protocol_fuzzer -jobs=1 -workers=1 \
   -max_total_time=3600 -print_final_stats=1 -rss_limit_mb=1536 -max_len=8192 -timeout=30 \
   -detect_leaks=0 -artifact_prefix=artifacts/crashers/protocol/ artifacts/corpus/protocol
 ```
+
+## Long hunt results
+
+Harness commit the binaries ran against: `8ea74809b5e`. The fuzzers were not rebuilt. Log window `2026-10-26T01:43:44Z` to `2026-10-26T05:52:41Z`. Exit code 0 on every job. **Zero sanitizer crashers.** No `crash-*`, `leak-*`, `timeout-*`, or `oom-*` file was written for any target.
+
+Coverage below is libFuzzer's per-worker edge and feature count at exit, not a merged total across workers. Executions are the worker's own count. `op_msg` had two workers, so its executions add.
+
+| Target | Workers | libFuzzer seconds | Executions | exec/s | Edges | Features | Peak RSS | Crash / leak / timeout / oom |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `op_msg_fuzzer` job 0 | 2 | 14896 | 1351318 | 90 | 51056 | 115146 | 3846MB | 0 |
+| `op_msg_fuzzer` job 1 | 2 | 14896 | 1354791 | 90 | 51242 | 111681 | 3846MB | 0 |
+| `sasl_handshake_fuzzer` | 1 | 14910 | 3467901 | 232 | 27069 | 55492 | 2097MB | 0 |
+| `protocol_fuzzer` | 1 | 5702 | 6870407 | 1204 | 9088 | 13490 | 772MB | 0 |
+
+`op_msg` job 0 and job 1 together executed 2,706,109 inputs. Both stayed under `-rss_limit_mb=5120`. SASL stayed under 3072. Protocol stayed under 1536. Protocol was started with `-max_total_time=3600`; libFuzzer reported 5702s, and the summary's START/END lines are `01:43:44Z` and `03:18:54Z`. Summaries: `artifacts/meta/op_msg.summary.txt`, `sasl.summary.txt`, `protocol.summary.txt`. Argv and the harness SHA are in `artifacts/meta/`.
+
+libFuzzer did write slow-input files. These are not sanitizer failures and were not turned into a bug writeup. `-timeout` did not produce a `timeout-*` artifact for them. The slowest unit libFuzzer recorded was 2215s (`op_msg`), 2407s (`sasl`), and 1796s (`protocol`). The bytes are:
+
+- `artifacts/crashers/op_msg/slow-unit-1c7d1304bb8793b275914916b101b95c5ae55b03`
+- `artifacts/crashers/op_msg/slow-unit-57856edce937d67182cd9b3be9a877859e50bd66`
+- `artifacts/crashers/op_msg/slow-unit-63eca57aef24233a8186e0cb0bd75de06165aeea`
+- `artifacts/crashers/sasl/slow-unit-0f6ebd2a7a6c0122bfc5b333183cf2cd8547ca90`
+- `artifacts/crashers/sasl/slow-unit-be71d3f98634d52ecb4de2e17bd75a1e860d30c0`
+- `artifacts/crashers/protocol/slow-unit-e3e1c49f4c77594ec3b82205a68b31793ce066c6`
+
+The grown corpus is `artifacts/corpus/op_msg` (5214 files), `artifacts/corpus/sasl` (2986 files, including the `exp=1893456000` JWT seeds), and `artifacts/corpus/protocol` (301 files). Full worker logs stayed on the machine and are not in git; the SASL worker log is mostly auth-metric lines.
