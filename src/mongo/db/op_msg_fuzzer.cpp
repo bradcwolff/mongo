@@ -31,11 +31,31 @@
 
 #include "mongo/db/op_msg_fuzzer_fixture.h"
 
-extern "C" int LLVMFuzzerTestOneInput(const char* Data, size_t Size) {
+#include <cstdio>
+
+namespace {
+mongo::OpMsgFuzzerFixture& fixture() {
     static auto fixture = []() {
         auto core = boost::log::core::get();
         core->set_logging_enabled(false);
         return mongo::OpMsgFuzzerFixture();
     }();
-    return fixture.testOneInput(Data, Size);
+    return fixture;
+}
+}  // namespace
+
+extern "C" int LLVMFuzzerInitialize(int* /*argc*/, char*** /*argv*/) {
+    const bool reached = fixture().selfTestCompressedDispatch();
+    if (!reached) {
+        fprintf(stderr, "OP_COMPRESSED_DISPATCH_PROOF failed\n");
+    }
+    return 0;
+}
+
+extern "C" int LLVMFuzzerTestOneInput(const char* Data, size_t Size) {
+    // Preserve the original wire-message corpus, including any input that is already OP_COMPRESSED.
+    fixture().testOneInput(Data, Size);
+    // Also wrap the same bytes in snappy/zlib/zstd so decompression runs into command dispatch.
+    fixture().testCompressedInput(Data, Size);
+    return 0;
 }

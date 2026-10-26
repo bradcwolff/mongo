@@ -1,0 +1,25 @@
+SHA 8ea74809b5e739c66920800eef9fb9b27dc2a228
+ARGV /workspace/bazel-bin/src/mongo/db/auth/sasl_handshake_fuzzer -jobs=1 -workers=1 -max_total_time=14400 -print_final_stats=1 -rss_limit_mb=3072 -max_len=4096 -timeout=30 -detect_leaks=0 -artifact_prefix=/workspace/artifacts/crashers/sasl/ /workspace/artifacts/corpus/sasl
+START 2026-10-26T01:43:44Z
+NOTE in-binary SASL self-test JWT still lacks exp; corpus oidc_jwt and oidc_step2 include exp=1893456000. Binary was not rebuilt.
+NOTE workers are long-lived. -fork was not used: each fork child restarts the server, and op_msg wall throughput fell to about 10 exec/s.
+================== Job 0 exited with exit code 0 ============
+Slowest unit: 1796 s:
+artifact_prefix='/workspace/artifacts/crashers/sasl/'; Test unit written to /workspace/artifacts/crashers/sasl/slow-unit-0f6ebd2a7a6c0122bfc5b333183cf2cd8547ca90
+Slowest unit: 2407 s:
+artifact_prefix='/workspace/artifacts/crashers/sasl/'; Test unit written to /workspace/artifacts/crashers/sasl/slow-unit-be71d3f98634d52ecb4de2e17bd75a1e860d30c0
+#3467901	DONE   cov: 27069 ft: 55492 corp: 1397/219Kb lim: 4096 exec/s: 232 rss: 2097Mb
+Done 3467901 runs in 14910 second(s)
+stat::number_of_executed_units: 3467901
+stat::average_exec_per_sec:     232
+stat::new_units_added:          6242
+stat::slowest_unit_time_sec:    2407
+stat::peak_rss_mb:              2097
+EXIT 0 20261026T055240Z left_at_start=14400
+Done 3467901 runs in 14910 second(s)
+stat::number_of_executed_units: 3467901
+stat::average_exec_per_sec:     232
+stat::new_units_added:          6242
+stat::slowest_unit_time_sec:    2407
+stat::peak_rss_mb:              2097
+END 2026-10-26T05:52:40Z

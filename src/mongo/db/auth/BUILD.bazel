@@ -1,5 +1,5 @@
 load("@poetry//:dependencies.bzl", "dependency")
-load("//bazel:mongo_src_rules.bzl", "mongo_cc_library", "mongo_cc_unit_test", "mongo_idl_library")
+load("//bazel:mongo_src_rules.bzl", "mongo_cc_fuzzer_test", "mongo_cc_library", "mongo_cc_unit_test", "mongo_idl_library")
 load("//bazel/config:render_template.bzl", "render_template")
 
 package(default_visibility = ["//visibility:public"])
@@ -372,6 +372,26 @@ mongo_cc_library(
     deps = [
         "//src/mongo:base",
         "//src/third_party/yaml-cpp:yaml",
+    ],
+)
+
+mongo_cc_fuzzer_test(
+    name = "sasl_handshake_fuzzer",
+    srcs = [
+        "sasl_handshake_fuzzer.cpp",
+    ],
+    deps = [
+        "//src/mongo/crypto:jwt",
+        "//src/mongo/db:server_base",
+        "//src/mongo/db:service_context",
+        "//src/mongo/db/auth:auth_impl_internal",
+        "//src/mongo/db/auth:authmocks",
+        "//src/mongo/db/auth:oidc_protocol",
+        "//src/mongo/db/auth:sasl_commands",
+        "//src/mongo/db/auth:sasl_commands_idl",
+        "//src/mongo/db/auth:saslauth",
+        "//src/mongo/db/auth:user",
+        "//src/mongo/util:md5",
     ],
 )
 

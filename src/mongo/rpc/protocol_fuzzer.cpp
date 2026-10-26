@@ -36,14 +36,30 @@
 #include "mongo/transport/message_compressor_manager.h"
 #include "mongo/transport/message_compressor_noop.h"
 #include "mongo/transport/message_compressor_registry.h"
+#include "mongo/transport/message_compressor_snappy.h"
+#include "mongo/transport/message_compressor_zlib.h"
+#include "mongo/transport/message_compressor_zstd.h"
 #include "mongo/util/shared_buffer.h"
 
+#include <memory>
+#include <string>
+#include <vector>
+
 namespace mongo {
+namespace {
+// Bound decompression so a hostile uncompressed-size field cannot force a 48MB allocation on
+// every input. Full command dispatch of the decompressed message lives in OpMsgFuzzerFixture.
+constexpr size_t kFuzzerDecompressCap = 256 * 1024;
+}  // namespace
 
 struct CompressionInfrastructure {
     CompressionInfrastructure() : manager(&registry) {
-        registry.setSupportedCompressors({"noop"});
+        std::vector<std::string> names = {"noop", "snappy", "zlib", "zstd"};
+        registry.setSupportedCompressors(std::move(names));
         registry.registerImplementation(std::make_unique<NoopMessageCompressor>());
+        registry.registerImplementation(std::make_unique<SnappyMessageCompressor>());
+        registry.registerImplementation(std::make_unique<ZlibMessageCompressor>());
+        registry.registerImplementation(std::make_unique<ZstdMessageCompressor>());
         uassertStatusOK(registry.finalizeSupportedCompressors());
     }
 
@@ -68,7 +84,8 @@ void doFuzzing(ConstDataRangeCursor fuzzedData) try {
 
     if (msg.operation() == dbCompressed) {
         static CompressionInfrastructure compression = {};
-        msg = uassertStatusOK(compression.manager.decompressMessage(msg));
+        msg = uassertStatusOK(
+            compression.manager.decompressMessage(msg, nullptr, kFuzzerDecompressCap));
     }
 
 

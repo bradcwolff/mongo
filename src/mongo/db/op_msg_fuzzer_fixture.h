@@ -32,6 +32,7 @@
 
 #include "mongo/bson/timestamp.h"
 #include "mongo/db/auth/authorization_manager_impl.h"
+#include "mongo/rpc/message.h"
 #include "mongo/db/auth/authz_manager_external_state_mock.h"
 #include "mongo/db/client_strand.h"
 #include "mongo/db/logical_time.h"
@@ -54,11 +55,33 @@ public:
 
     /**
      * Run a single operation as if it came from the network.
+     *
+     * When the framed message is OP_COMPRESSED, snappy/zlib/zstd decompression runs and the
+     * decompressed message is handed to ServiceEntryPoint::handleRequest (full command dispatch).
      */
     int testOneInput(const char* Data, size_t Size);
 
+    /**
+     * Frame Data as an inner message, compress it with snappy, zlib, or zstd (selector in
+     * Data[0]), optionally mutate the claimed uncompressed size, then decompress and dispatch.
+     */
+    int testCompressedInput(const char* Data, size_t Size);
+
+    /**
+     * Compress a ping with snappy, zlib, and zstd and dispatch each one.
+     * Returns true only when every compressor reached command dispatch.
+     */
+    bool selfTestCompressedDispatch();
+
+    uint64_t compressedDispatches() const;
+
 private:
     void _setAuthorizationManager();
+
+    int _dispatchWireMessage(Message msg);
+
+    struct CompressionState;
+    std::unique_ptr<CompressionState> _compression;
 
     const LogicalTime kInMemoryLogicalTime = LogicalTime(Timestamp(3, 1));
 

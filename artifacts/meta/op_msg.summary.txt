@@ -1,0 +1,41 @@
+SHA 8ea74809b5e739c66920800eef9fb9b27dc2a228
+ARGV /workspace/bazel-bin/src/mongo/db/op_msg_fuzzer -jobs=2 -workers=2 -max_total_time=14400 -print_final_stats=1 -rss_limit_mb=5120 -max_len=8192 -timeout=60 -detect_leaks=0 -artifact_prefix=/workspace/artifacts/crashers/op_msg/ /workspace/artifacts/corpus/op_msg
+START 2026-10-26T01:43:44Z
+NOTE in-binary SASL self-test JWT still lacks exp; corpus oidc_jwt and oidc_step2 include exp=1893456000. Binary was not rebuilt.
+NOTE workers are long-lived. -fork was not used: each fork child restarts the server, and op_msg wall throughput fell to about 10 exec/s.
+================== Job 1 exited with exit code 0 ============
+Slowest unit: 23 s:
+artifact_prefix='/workspace/artifacts/crashers/op_msg/'; Test unit written to /workspace/artifacts/crashers/op_msg/slow-unit-63eca57aef24233a8186e0cb0bd75de06165aeea
+#1354791	DONE   cov: 51242 ft: 111681 corp: 2476/719Kb lim: 3546 exec/s: 90 rss: 3846Mb
+Done 1354791 runs in 14896 second(s)
+stat::number_of_executed_units: 1354791
+stat::average_exec_per_sec:     90
+stat::new_units_added:          3647
+stat::slowest_unit_time_sec:    23
+stat::peak_rss_mb:              3846
+================== Job 0 exited with exit code 0 ============
+Slowest unit: 1796 s:
+artifact_prefix='/workspace/artifacts/crashers/op_msg/'; Test unit written to /workspace/artifacts/crashers/op_msg/slow-unit-1c7d1304bb8793b275914916b101b95c5ae55b03
+Slowest unit: 2215 s:
+artifact_prefix='/workspace/artifacts/crashers/op_msg/'; Test unit written to /workspace/artifacts/crashers/op_msg/slow-unit-57856edce937d67182cd9b3be9a877859e50bd66
+#1351318	DONE   cov: 51056 ft: 115146 corp: 2470/716Kb lim: 3612 exec/s: 90 rss: 3846Mb
+Done 1351318 runs in 14896 second(s)
+stat::number_of_executed_units: 1351318
+stat::average_exec_per_sec:     90
+stat::new_units_added:          3600
+stat::slowest_unit_time_sec:    2215
+stat::peak_rss_mb:              3846
+EXIT 0 20261026T055241Z left_at_start=14400
+Done 1351318 runs in 14896 second(s)
+stat::number_of_executed_units: 1351318
+stat::average_exec_per_sec:     90
+stat::new_units_added:          3600
+stat::slowest_unit_time_sec:    2215
+stat::peak_rss_mb:              3846
+Done 1354791 runs in 14896 second(s)
+stat::number_of_executed_units: 1354791
+stat::average_exec_per_sec:     90
+stat::new_units_added:          3647
+stat::slowest_unit_time_sec:    23
+stat::peak_rss_mb:              3846
+END 2026-10-26T05:52:41Z
