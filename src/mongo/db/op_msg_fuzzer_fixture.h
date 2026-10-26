@@ -30,6 +30,8 @@
 #include <cstddef>
 #include <memory>
 
+#include "mongo/base/status_with.h"
+#include "mongo/bson/bsonobj.h"
 #include "mongo/bson/timestamp.h"
 #include "mongo/db/auth/authorization_manager_impl.h"
 #include "mongo/db/auth/authz_manager_external_state_mock.h"
@@ -57,8 +59,29 @@ public:
      */
     int testOneInput(const char* Data, size_t Size);
 
+    /**
+     * Prepare this fixture so a structure-aware fuzzer can execute commands.
+     *
+     * Grants the in-memory client internal authorization and marks the mock replication
+     * coordinator writable. The byte-oriented op_msg fuzzer does not call this.
+     */
+    void prepareForAggregationExecutionFuzzing();
+
+    /**
+     * Dispatch one OP_MSG command body through the mongod service entry point.
+     *
+     * `body` must be a command document including `$db`. Command failures and assertion
+     * exceptions raised while handling invalid commands are returned as a status. Sanitizer
+     * faults are not caught. On success the owned command reply body is returned.
+     */
+    StatusWith<BSONObj> runCommand(const BSONObj& body);
+
 private:
     void _setAuthorizationManager();
+
+    // True after prepareForAggregationExecutionFuzzing installs an IndexBuildsCoordinator.
+    // The destructor shuts that coordinator down before the storage engine.
+    bool _indexBuildsCoordinatorInstalled = false;
 
     const LogicalTime kInMemoryLogicalTime = LogicalTime(Timestamp(3, 1));
 

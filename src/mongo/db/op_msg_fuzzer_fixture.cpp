@@ -34,19 +34,26 @@
 
 #include <boost/smart_ptr/intrusive_ptr.hpp>
 
+#include "mongo/base/error_codes.h"
 #include "mongo/base/initializer.h"
 #include "mongo/base/status.h"
 #include "mongo/base/string_data.h"
+#include "mongo/bson/bsonobj.h"
 #include "mongo/db/auth/authorization_manager.h"
+#include "mongo/db/auth/authorization_session.h"
 #include "mongo/db/catalog/collection.h"
 #include "mongo/db/catalog/collection_impl.h"
 #include "mongo/db/catalog/database_holder.h"
 #include "mongo/db/catalog/database_holder_impl.h"
 #include "mongo/db/concurrency/d_concurrency.h"
 #include "mongo/db/concurrency/lock_manager_defs.h"
+#include "mongo/db/index_builds_coordinator.h"
+#include "mongo/db/index_builds_coordinator_mongod.h"
 #include "mongo/db/op_msg_fuzzer_fixture.h"
 #include "mongo/db/op_observer/op_observer.h"
 #include "mongo/db/op_observer/op_observer_registry.h"
+#include "mongo/db/query/query_settings/query_settings_manager.h"
+#include "mongo/db/repl/member_state.h"
 #include "mongo/db/repl/repl_settings.h"
 #include "mongo/db/repl/replication_coordinator.h"
 #include "mongo/db/repl/replication_coordinator_mock.h"
@@ -62,6 +69,7 @@
 #include "mongo/db/storage/storage_options.h"
 #include "mongo/db/vector_clock_mutable.h"
 #include "mongo/rpc/message.h"
+#include "mongo/rpc/op_msg.h"
 #include "mongo/s/sharding_state.h"
 #include "mongo/transport/service_entry_point.h"
 #include "mongo/util/assert_util.h"
@@ -150,6 +158,12 @@ OpMsgFuzzerFixture::OpMsgFuzzerFixture(bool skipGlobalInitializers)
 }
 
 OpMsgFuzzerFixture::~OpMsgFuzzerFixture() {
+    if (_indexBuildsCoordinatorInstalled) {
+        auto clientGuard = _clientStrand->bind();
+        auto opCtx = _serviceContext->makeOperationContext(clientGuard.get());
+        IndexBuildsCoordinator::get(_serviceContext)->shutdown(opCtx.get());
+    }
+
     CollectionShardingStateFactory::clear(_serviceContext);
 
     {
@@ -161,6 +175,53 @@ OpMsgFuzzerFixture::~OpMsgFuzzerFixture() {
     }
 
     shutdownGlobalStorageEngineCleanly(_serviceContext, true /* memLeakAllowed */);
+}
+
+void OpMsgFuzzerFixture::prepareForAggregationExecutionFuzzing() {
+    auto clientGuard = _clientStrand->bind();
+    AuthorizationSession::get(clientGuard.get())->grantInternalAuthorization(clientGuard.get());
+
+    auto* replCoord = repl::ReplicationCoordinator::get(_serviceContext);
+    invariant(replCoord);
+    auto* mock = dynamic_cast<repl::ReplicationCoordinatorMock*>(replCoord);
+    invariant(mock);
+    mock->alwaysAllowWrites(true);
+    uassertStatusOK(mock->setFollowerMode(repl::MemberState(repl::MemberState::RS_PRIMARY)));
+
+    // createIndexes invariant-fails unless a coordinator is installed. The byte-oriented
+    // op_msg fuzzer does not call this method, so its ServiceContext stays unchanged.
+    IndexBuildsCoordinator::set(_serviceContext, std::make_unique<IndexBuildsCoordinatorMongod>());
+    _indexBuildsCoordinatorInstalled = true;
+
+    // Aggregate registers query stats and then looks up query settings. The manager
+    // decoration is null until create() runs, which mongod_main does and this fixture does not.
+    query_settings::QuerySettingsManager::create(_serviceContext, {}, {});
+}
+
+StatusWith<BSONObj> OpMsgFuzzerFixture::runCommand(const BSONObj& body) {
+    auto clientGuard = _clientStrand->bind();
+    auto opCtx = _serviceContext->makeOperationContext(clientGuard.get());
+    VectorClockMutable::get(_serviceContext)->tickClusterTimeTo(kInMemoryLogicalTime);
+
+    try {
+        OpMsgBuilder msgBuilder;
+        msgBuilder.setBody(body);
+        auto msg = msgBuilder.finish();
+        auto dbResponse = _serviceContext->getService()
+                              ->getServiceEntryPoint()
+                              ->handleRequest(opCtx.get(), msg)
+                              .get();
+        if (dbResponse.response.empty()) {
+            return Status(ErrorCodes::UnknownError, "service entry point returned an empty reply");
+        }
+        auto parsed = OpMsg::parseOwned(dbResponse.response);
+        if (!parsed.body["ok"].trueValue()) {
+            return Status(ErrorCodes::UnknownError, parsed.body.toString());
+        }
+        return parsed.body.getOwned();
+    } catch (const DBException& ex) {
+        return ex.toStatus();
+    }
 }
 
 int OpMsgFuzzerFixture::testOneInput(const char* Data, size_t Size) {

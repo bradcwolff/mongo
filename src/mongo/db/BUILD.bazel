@@ -2148,7 +2148,9 @@ mongo_cc_library(
         "//src/mongo/db/auth:authmocks",
         "//src/mongo/db/catalog:catalog_impl",
         "//src/mongo/db/catalog:database_holder",
+        "//src/mongo/db:index_builds_coordinator_mongod",
         "//src/mongo/db/op_observer",
+        "//src/mongo/db/query/query_settings:manager",
         "//src/mongo/db/repl:replmocks",
         "//src/mongo/db/s:sharding_runtime_d",
         "//src/mongo/db/stats:top",
@@ -3694,6 +3696,28 @@ mongo_cc_fuzzer_test(
     deps = [
         ":op_msg_fuzzer_fixture",
         ":server_base",
+    ],
+)
+
+# Structure-aware aggregation execution fuzzer. Grammar bytes become pipeline
+# commands and are dispatched through op_msg_fuzzer_fixture's ServiceContext.
+# Build only with --//bazel/config:fsan=True (and address sanitizer in practice).
+mongo_cc_fuzzer_test(
+    name = "agg_exec_fuzzer",
+    srcs = [
+        "agg_exec_fuzzer.cpp",
+    ],
+    # --no-as-needed keeps //src/mongo/db/commands:standalone loaded so its
+    # static initializers register aggregate, insert, and createIndexes.
+    linkopts = ["-Wl,--no-as-needed"],
+    deps = [
+        ":op_msg_fuzzer_fixture",
+        ":server_base",
+        "//src/mongo/db/commands:standalone",
+        # Registers MongoProcessInterface::create. The factory is a static
+        # initializer with no symbol referenced by standalone, so it has to be
+        # a direct dependency of this binary (kept by --no-as-needed).
+        "//src/mongo/db/pipeline/process_interface:mongod_process_interface_factory",
     ],
 )
 

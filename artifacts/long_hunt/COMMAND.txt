@@ -1,0 +1,16 @@
+# harness source SHA (binary built from this tree; later commit only updated RUN-NOTES)
+19215cd4349c58008a7b5cd64aafa942e9504d20
+# branch HEAD at launch
+fdeb578ea5bb975d57c5ac2e67fc6bc913a0427b
+
+cd /workspace/artifacts/long_hunt
+ASAN_OPTIONS=abort_on_error=1:halt_on_error=1:detect_leaks=0:allocator_may_return_null=1:symbolize=1
+ASAN_SYMBOLIZER_PATH=/home/ubuntu/.cache/bazel/_bazel_ubuntu/eab0d61a99b6696edb3d2aff87b585e8/external/mongo_toolchain_v4/stow/llvm-v4/bin/llvm-symbolizer
+/workspace/bazel-bin/src/mongo/db/agg_exec_fuzzer \
+  -jobs=3 -workers=3 \
+  -max_total_time=14400 \
+  -timeout=60 \
+  -rss_limit_mb=3072 \
+  -print_final_stats=1 \
+  -artifact_prefix=/workspace/artifacts/agg_exec_long_ \
+  /workspace/src/mongo/db/fuzz_corpus/agg_exec_fuzzer_longrun
