@@ -1,0 +1,33 @@
+# Long hunt stats
+# binary built from harness SHA 19215cd4349c58008a7b5cd64aafa942e9504d20
+# branch HEAD at launch fdeb578ea5bb975d57c5ac2e67fc6bc913a0427b
+# wall clock: 2026-10-26 01:08 UTC launch, 2026-10-26 05:14 UTC parent exit (~4h 6m)
+# crash / leak / timeout / oom artifacts: 0
+# slow-unit artifacts (not sanitizer findings): 9, under artifacts/agg_exec_long_slow-unit-*
+
+## fuzz-0.log
+#2865220	DONE   cov: 14108 ft: 32013 corp: 939/61Kb lim: 4096 exec/s: 198 rss: 1716Mb
+Done 2865220 runs in 14401 second(s)
+stat::number_of_executed_units: 2865220
+stat::average_exec_per_sec:     198
+stat::new_units_added:          3137
+stat::slowest_unit_time_sec:    2720
+stat::peak_rss_mb:              1716
+
+## fuzz-1.log
+#2847660	DONE   cov: 14117 ft: 32242 corp: 937/59Kb lim: 4096 exec/s: 197 rss: 1720Mb
+Done 2847660 runs in 14401 second(s)
+stat::number_of_executed_units: 2847660
+stat::average_exec_per_sec:     197
+stat::new_units_added:          3228
+stat::slowest_unit_time_sec:    2720
+stat::peak_rss_mb:              1720
+
+## fuzz-2.log
+#2855965	DONE   cov: 14026 ft: 30386 corp: 941/63Kb lim: 4096 exec/s: 198 rss: 1716Mb
+Done 2855965 runs in 14401 second(s)
+stat::number_of_executed_units: 2855965
+stat::average_exec_per_sec:     198
+stat::new_units_added:          3328
+stat::slowest_unit_time_sec:    1838
+stat::peak_rss_mb:              1716

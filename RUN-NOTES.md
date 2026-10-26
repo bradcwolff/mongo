@@ -109,6 +109,40 @@ Bounded smoke, same binary, `-max_total_time=90 -timeout=30 -print_final_stats=1
 
 No AddressSanitizer report and no libFuzzer crash, timeout, or OOM artifact. `artifacts/` has `agg_exec_smoke90.txt` with that stat block. Earlier empty-input artifacts (`crash-da39a3ee…`) were harness setup failures (a glibc/ASAN TLS check, then missing service wiring) and were deleted. They are not aggregation defects.
 
+## Long hunt
+
+Same binary as the smoke (`bazel-bin/src/mongo/db/agg_exec_fuzzer`, harness SHA `19215cd4349c58008a7b5cd64aafa942e9504d20`). Branch HEAD at launch was `fdeb578ea5bb975d57c5ac2e67fc6bc913a0427b` (notes-only commit on top of that harness). Wall clock 2026-10-26 01:08 UTC to 05:14 UTC (about 4h 6m). Parent exit 0.
+
+Three libFuzzer jobs shared one corpus (`-jobs=3 -workers=3`), seeded from the 16 in-tree seeds:
+
+```bash
+ASAN_OPTIONS=abort_on_error=1:halt_on_error=1:detect_leaks=0:allocator_may_return_null=1:symbolize=1 \
+  ./bazel-bin/src/mongo/db/agg_exec_fuzzer \
+  -jobs=3 -workers=3 \
+  -max_total_time=14400 \
+  -timeout=60 \
+  -rss_limit_mb=3072 \
+  -print_final_stats=1 \
+  -artifact_prefix=artifacts/agg_exec_long_ \
+  src/mongo/db/fuzz_corpus/agg_exec_fuzzer_longrun
+```
+
+`rss_limit_mb=3072` is per worker. The smoke peak was 1712 MB, so 3072 avoids the default 2048 MB false OOM. Three workers at that cap stay under the 16 GB guest. `detect_leaks=0` is unchanged: the fixture's process-lifetime allocations are not a finding, so this run produced no leak files.
+
+Each worker stopped on `-max_total_time`. Combined executions: 8,568,845.
+
+| worker | runs | seconds | exec/s | final cov | features | peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0 | 2865220 | 14401 | 198 | 14108 | 32013 | 1716 |
+| 1 | 2847660 | 14401 | 197 | 14117 | 32242 | 1720 |
+| 2 | 2855965 | 14401 | 198 | 14026 | 30386 | 1716 |
+
+Coverage counters are per process. The highest one observed was 14117, up from 13213 at the end of the 90s smoke. The shared corpus on disk is `src/mongo/db/fuzz_corpus/agg_exec_fuzzer_longrun/` (6297 files, 344406 bytes, including the original seeds).
+
+Crasher count: **0**. No `crash-`, `leak-`, `timeout-`, or `oom-` file was written. No AddressSanitizer, LeakSanitizer, or libFuzzer deadly-signal report is in the worker logs. Stat block: `artifacts/agg_exec_long_stats.txt`.
+
+libFuzzer did write 9 `slow-unit-` inputs (kept as `artifacts/agg_exec_long_slow-unit-*`). Those are not sanitizer crashes. `stat::slowest_unit_time_sec` was 2720, 2720, and 1838 with `-timeout=60`, and no `timeout-` artifact was produced. The inputs are saved; they were not replayed or turned into a hang analysis.
+
 Local environment fixes that are not in the commit, and that a fresh VM needs before this binary will run:
 
 - Empty Bazel stubs under `src/mongo/db/modules/enterprise/` so analysis can load unconditional enterprise labels. They are gitexcluded. Pass `--//bazel/config:build_enterprise=False`.
