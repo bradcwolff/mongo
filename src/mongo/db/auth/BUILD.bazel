@@ -387,6 +387,7 @@ mongo_cc_fuzzer_test(
         "//src/mongo/db/auth:auth_impl_internal",
         "//src/mongo/db/auth:authmocks",
         "//src/mongo/db/auth:oidc_protocol",
+        "//src/mongo/db/auth:sasl_commands",
         "//src/mongo/db/auth:sasl_commands_idl",
         "//src/mongo/db/auth:saslauth",
         "//src/mongo/db/auth:user",
