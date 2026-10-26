@@ -222,8 +222,10 @@ private:
 
     static std::string _sampleJwt() {
         const auto header = base64url::encode(R"({"alg":"none","kid":"k"})"_sd);
+        // exp is required (jwt_types.idl JWT.exp, unixEpoch seconds). 1893456000 is
+        // 2030-01-01 and fits in an int32 so fromjson stores a numeric BSON date field.
         const auto body = base64url::encode(
-            R"({"iss":"https://example.com","sub":"fuzzer","aud":"app"})"_sd);
+            R"({"iss":"https://example.com","sub":"fuzzer","aud":"app","exp":1893456000})"_sd);
         return header + "." + body + ".c2ln";
     }
 
